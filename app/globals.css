@@ -1,0 +1,110 @@
+@import 'tailwindcss';
+
+/* ------------------------------------------------------------------ *
+ * Design tokens — Bauhaus.
+ * Everything downstream references these, never raw hex values.
+ * ------------------------------------------------------------------ */
+@theme {
+  --color-canvas: #f0f0f0;
+  --color-ink: #121212;
+  --color-paper: #ffffff;
+  --color-muted: #e0e0e0;
+  --color-bh-red: #d02020;
+  --color-bh-blue: #1040c0;
+  --color-bh-yellow: #f0c020;
+  --color-bh-cream: #fff9c4;
+
+  --font-display: 'Outfit', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Hard offset shadows — never blurred. Depth comes from layering, not light. */
+  --shadow-hard-xs: 2px 2px 0 0 #121212;
+  --shadow-hard-sm: 3px 3px 0 0 #121212;
+  --shadow-hard: 4px 4px 0 0 #121212;
+  --shadow-hard-md: 6px 6px 0 0 #121212;
+  --shadow-hard-lg: 8px 8px 0 0 #121212;
+
+  --ease-mechanical: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    font-weight: 500;
+    /* Room for the fixed scan bar on mobile. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Constructivist typography: uppercase, black weight, tight tracking. */
+  h1, h2, h3 {
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.03em;
+    line-height: 0.9;
+  }
+
+  /* Focus is a hard offset ring, in keeping with the rest of the system. */
+  :focus-visible {
+    outline: 3px solid var(--color-bh-blue);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-bh-yellow);
+    color: var(--color-ink);
+  }
+
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+}
+
+@layer utilities {
+  /* Uppercase micro-label used above every control and section. */
+  .label-mono {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+
+  /* Dot grid used behind hero and empty states. */
+  .bg-dots {
+    background-image: radial-gradient(var(--color-ink) 2px, transparent 2px);
+    background-size: 20px 20px;
+  }
+
+  .bg-dots-light {
+    background-image: radial-gradient(#ffffff 2px, transparent 2px);
+    background-size: 20px 20px;
+  }
+
+  .clip-triangle {
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+  }
+
+  /* Horizontal chip rails: scrollable, no visible scrollbar. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
