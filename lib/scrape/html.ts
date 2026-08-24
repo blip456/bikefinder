@@ -207,3 +207,49 @@ export function pickNumber(record: Record<string, unknown>, keys: string[]): num
   }
   return null
 }
+
+/**
+ * Work out the URL of the next results page.
+ *
+ * Explicit markup first (`rel="next"`, a numbered pagination link greater than
+ * the current page). Only if the page looks paginated but says so in markup we
+ * cannot read do we fall back to incrementing a `page` parameter — and the
+ * caller stops as soon as a page yields no new listings, which keeps that guess
+ * from running away.
+ */
+export function nextPageUrl($: Cheerio, currentUrl: string): string | null {
+  const explicit =
+    $('link[rel="next"]').attr('href') ??
+    $('a[rel="next"]').attr('href') ??
+    $('[class*="pagination" i] a[rel="next"]').attr('href')
+  const resolved = absoluteUrl(explicit, currentUrl)
+  if (resolved && resolved !== currentUrl) return resolved
+
+  let current: URL
+  try {
+    current = new URL(currentUrl)
+  } catch {
+    return null
+  }
+
+  const pageParam = ['page', 'p', 'pagina'].find((key) => current.searchParams.has(key))
+  const currentPage = pageParam ? Number(current.searchParams.get(pageParam)) || 1 : 1
+
+  // A numbered link one above the current page.
+  let numbered: string | null = null
+  $('[class*="pagination" i] a[href], nav a[href]').each((_, element) => {
+    if (numbered) return
+    const text = cleanText($(element).text())
+    if (String(currentPage + 1) !== text) return
+    numbered = absoluteUrl($(element).attr('href'), currentUrl)
+  })
+  if (numbered && numbered !== currentUrl) return numbered
+
+  const looksPaginated = $('[class*="pagination" i], [class*="pager" i], [data-page]').length > 0
+  if (!looksPaginated) return null
+
+  const next = new URL(current.toString())
+  next.searchParams.set(pageParam ?? 'page', String(currentPage + 1))
+  const candidate = next.toString()
+  return candidate === currentUrl ? null : candidate
+}

@@ -115,6 +115,8 @@ export interface Criteria {
   requirePrice: boolean
   minScore: number
   maxPerSource: number
+  /** How many result pages to follow per source. 1 = just the landing page. */
+  maxPages: number
 }
 
 export type WeightKey =
@@ -142,8 +144,13 @@ export interface SourceReport {
   label: string
   adapter: AdapterId
   ok: boolean
+  /** Listings the adapter recognised across every page fetched. */
   found: number
   kept: number
+  /** Pages actually fetched, so a truncated scan is visible rather than implied. */
+  pages: number
+  /** Why listings were discarded, keyed by reason. */
+  dropped?: Record<string, number>
   error?: string
   hint?: string
 }

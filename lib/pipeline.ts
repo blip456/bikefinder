@@ -88,26 +88,45 @@ export function passesHardFilters(
   return { keep: true }
 }
 
+export interface BuildResult {
+  bikes: ScoredBike[]
+  /** Count of discarded listings by reason, for the per-source report. */
+  dropped: Record<string, number>
+}
+
 export function buildBikes(
   listings: RawListing[],
   source: Pick<Source, 'id' | 'label' | 'adapter'>,
   criteria: Criteria,
   weights: Weights,
   demo = false,
-): ScoredBike[] {
+): BuildResult {
   const bikes: ScoredBike[] = []
+  const dropped: Record<string, number> = {}
+  const drop = (reason: string) => {
+    dropped[reason] = (dropped[reason] ?? 0) + 1
+  }
   const seen = new Set<string>()
 
   for (const listing of listings) {
-    if (!listing.url || !listing.title) continue
-    if (seen.has(listing.url)) continue
+    if (!listing.url || !listing.title) {
+      drop('unusable listing')
+      continue
+    }
+    if (seen.has(listing.url)) {
+      drop('duplicate')
+      continue
+    }
     seen.add(listing.url)
 
     const description = listing.description ?? ''
     const spec = extractSpec(listing.title, description, listing.attributes ?? {})
 
     const outcome = passesHardFilters(listing, spec, criteria)
-    if (!outcome.keep) continue
+    if (!outcome.keep) {
+      drop(outcome.reason ?? 'filtered')
+      continue
+    }
 
     const images = (listing.images ?? []).filter(Boolean).slice(0, 8)
     const price = listing.price ?? null
@@ -121,7 +140,10 @@ export function buildBikes(
       msrpFrom(listing.attributes),
     )
 
-    if (score < criteria.minScore) continue
+    if (score < criteria.minScore) {
+      drop('below min score')
+      continue
+    }
 
     bikes.push({
       id: stableId(listing.url),
@@ -146,5 +168,7 @@ export function buildBikes(
   }
 
   bikes.sort((a, b) => b.score - a.score)
-  return bikes.slice(0, Math.max(1, criteria.maxPerSource))
+  const capped = bikes.slice(0, Math.max(1, criteria.maxPerSource))
+  if (capped.length < bikes.length) dropped['over max per source'] = bikes.length - capped.length
+  return { bikes: capped, dropped }
 }

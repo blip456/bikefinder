@@ -14,7 +14,7 @@ const MAX_SOURCES = 12
 
 function demoResult(settings: Settings): { report: SourceReport; bikes: ScoredBike[] } {
   const source = { id: 'demo', label: 'Sample data', adapter: 'generic' as const }
-  const bikes = buildBikes(
+  const { bikes, dropped } = buildBikes(
     DEMO_LISTINGS,
     source,
     { ...settings.criteria, maxPerSource: Math.max(settings.criteria.maxPerSource, DEMO_LISTINGS.length) },
@@ -27,8 +27,10 @@ function demoResult(settings: Settings): { report: SourceReport; bikes: ScoredBi
       label: 'Sample data',
       adapter: 'generic',
       ok: true,
+      pages: 1,
       found: DEMO_LISTINGS.length,
       kept: bikes.length,
+      dropped,
       hint: 'Demo mode is on — these are built-in sample listings, not live results.',
     },
     bikes,

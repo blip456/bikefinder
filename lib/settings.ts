@@ -65,7 +65,9 @@ export const DEFAULT_CRITERIA: Criteria = {
   allowElectric: false,
   requirePrice: true,
   minScore: 0,
-  maxPerSource: 60,
+  // Raised alongside pagination — one page of a big marketplace is ~24 results.
+  maxPerSource: 150,
+  maxPages: 3,
 }
 
 export const DEFAULT_SETTINGS: Settings = {

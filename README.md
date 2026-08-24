@@ -48,6 +48,31 @@ Three marketplaces are supported natively, each with its own parser:
 Add your own URL in **Settings → Sources**; the right adapter is picked
 automatically from the hostname.
 
+Card extraction is **anchor-first**: the scraper works out which links are the
+results (they share a directory prefix and each point at a distinct path, unlike
+navigation, vendor or filter links), then climbs from each link to the outermost
+element that still describes only that result. That element is the card, and it
+is where the price and image live. Guessing which `div` was a card instead — the
+obvious approach — either merged a whole grid into one result or split one card
+into title-only fragments.
+
+### Pagination
+
+Most marketplaces show ~24 results per page, so a single fetch sees a small
+fraction of what the site displays. Each source follows **Pages to follow per
+source** (Settings → Results, default 3, hard-capped at 10) using `rel="next"`
+or a numbered pagination link, falling back to incrementing a `page` parameter
+only when the page looks paginated. A scan stops early as soon as a page adds no
+new listings, which keeps that fallback from running away, and pages already
+fetched are kept even if a later one fails.
+
+### Why a source returned fewer results than you expected
+
+Every source reports the pages it fetched, the listings it recognised, and a
+breakdown of **why listings were discarded** — `88 e-bike`, `8 over max price`,
+`3 wrong size`. If a scan comes back thin, that breakdown says whether the
+scraper missed them or your criteria removed them.
+
 ### 2. Extraction
 
 `lib/parse/extract.ts` turns a free-text title and description — in Dutch,
@@ -109,6 +134,15 @@ All settings are saved to `localStorage` under `bikefinder.settings.v1`, and the
 last scan is cached under `bikefinder.results.v1`.
 
 ---
+
+## buycycle renders its grid in the browser
+
+buycycle's server HTML carries only whatever the page hydrates with — often a
+handful of "recently viewed" bikes — while the actual result grid is fetched
+client-side. A server-side scan therefore sees a fraction of the catalogue no
+matter how many pages it follows, and the per-source report will show a small
+`found` count with `0` drops. Reading the full grid needs either their JSON API
+or `SCRAPE_PROXY_URL` pointed at a rendering proxy.
 
 ## Facebook Marketplace
 

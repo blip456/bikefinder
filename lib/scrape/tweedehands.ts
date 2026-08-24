@@ -18,7 +18,7 @@ import {
   pickString,
   upgradeImage,
 } from './html'
-import { harvestCards, scrapeGeneric } from './generic'
+import { harvestCards, mergeByUrl, scrapeGeneric } from './generic'
 
 const INLINE_MARKERS = ['__NEXT_DATA__', 'window.__INITIAL_STATE__', 'window.__CONFIG__', 'window.__PRELOADED_STATE__']
 
@@ -102,12 +102,6 @@ function fromInlineJson(html: string, baseUrl: string): RawListing[] {
 
 function fromMarkup($: Cheerio, baseUrl: string): RawListing[] {
   return harvestCards($, baseUrl, {
-    cardSelectors: [
-      'li.hz-Listing',
-      '[class*="hz-Listing"][class*="item" i]',
-      'li[data-testid="listing"]',
-      'article[class*="Listing" i]',
-    ],
     linkPattern: /\/v\//i,
     titleSelectors: ['.hz-Listing-title', 'h3', 'h2', '[class*="title" i]'],
     priceSelectors: ['.hz-Listing-price', '[class*="price" i]'],
@@ -115,34 +109,11 @@ function fromMarkup($: Cheerio, baseUrl: string): RawListing[] {
 }
 
 export function scrapeTweedehands(html: string, $: Cheerio, baseUrl: string): RawListing[] {
-  const fromJson = fromInlineJson(html, baseUrl)
-  if (fromJson.length >= 3) return fromJson
-
-  const fromDom = fromMarkup($, baseUrl)
-  if (fromDom.length >= 3) return dedupeByUrl([...fromJson, ...fromDom])
-
-  return dedupeByUrl([
-    ...fromJson,
-    ...fromDom,
-    ...scrapeGeneric($, baseUrl, { linkPattern: /\/v\//i }),
-  ])
+  // Union rather than first-strategy-wins: the inline blob and the rendered
+  // markup each miss listings the other catches, and stopping at the first
+  // non-empty one silently capped the result set.
+  const merged = mergeByUrl([...fromInlineJson(html, baseUrl), ...fromMarkup($, baseUrl)])
+  if (merged.length) return merged
+  return scrapeGeneric($, baseUrl, { linkPattern: /\/v\//i })
 }
 
-function dedupeByUrl(listings: RawListing[]): RawListing[] {
-  const map = new Map<string, RawListing>()
-  for (const listing of listings) {
-    const existing = map.get(listing.url)
-    if (!existing) {
-      map.set(listing.url, listing)
-      continue
-    }
-    map.set(listing.url, {
-      ...existing,
-      ...listing,
-      price: listing.price ?? existing.price ?? null,
-      images: dedupe([...(existing.images ?? []), ...(listing.images ?? [])]),
-      description: listing.description || existing.description,
-    })
-  }
-  return [...map.values()]
-}

@@ -39,20 +39,30 @@ export function Sheet({
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // Callers pass an inline arrow for onClose, so its identity changes on every
+  // parent render. Reading it through a ref keeps the effect below keyed on
+  // `open` alone — otherwise it re-ran on each keystroke and the panel stole
+  // focus back from whatever field the user was typing into.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
+
   useEffect(() => {
     if (!open) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    // Move focus into the panel once, as it opens.
     panelRef.current?.focus()
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 

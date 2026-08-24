@@ -286,7 +286,13 @@ export function extractTravel(text: string): number | null {
 }
 
 export function isElectric(text: string): boolean {
-  return /(?<![a-z])(e-?bike|e-?mtb|elektrisch|electric|pedelec|bosch\s*(?:performance|cx)|shimano\s*steps|brose|yamaha\s*pw|specialized\s*levo|kenevo|decoy|moterra|rise\s*h|powerfly)(?![a-z])/i.test(text)
+  // Adjectival forms carry endings ("elektrische fiets", "vélo électrique",
+  // normalised to "electrique"), so these match on prefix rather than as whole
+  // words. A collection of e-MTBs was previously read as ordinary bikes.
+  if (/(?<![a-z])(elektrisch|electrisch|electriq|elektrische|e-?bikes?|e-?mtbs?|pedelec|speed\s*pedelec)/i.test(text)) {
+    return true
+  }
+  return /(?<![a-z])(electric|bosch\s*(?:performance|cx|active)|shimano\s*steps|brose|yamaha\s*pw|mid\s*drive|specialized\s*levo|kenevo|decoy|moterra|rise\s*h|powerfly|sduro|jarifa|cairon|macina|overvolt|e-?ride|turbo\s*tero|vae)(?![a-z])/i.test(text)
 }
 
 function titleCase(value: string): string {
