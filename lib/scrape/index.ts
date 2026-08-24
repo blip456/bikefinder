@@ -2,6 +2,8 @@ import type { Criteria, RawListing, ScoredBike, Source, SourceReport, Weights } 
 import { buildBikes } from '@/lib/pipeline'
 import { ScrapeError, fetchHtml } from './fetcher'
 import { load, nextPageUrl } from './html'
+import { type ApiKind, discoverApiEndpoints } from './api-discovery'
+import { listingsFromJson } from './json-listings'
 import { scrapeBuycycle } from './buycycle'
 import { scrapeFacebook } from './facebook'
 import { mergeByUrl, scrapeGeneric } from './generic'
@@ -18,7 +20,9 @@ const PAGE_LIMIT = 10
 /** Courtesy gap between page requests. */
 const PAGE_DELAY_MS = 400
 
-function parsePage(adapter: Source['adapter'], html: string, finalUrl: string) {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function parseMarkup(adapter: Source['adapter'], html: string, finalUrl: string) {
   const $ = load(html)
   switch (adapter) {
     case 'tweedehands':
@@ -32,7 +36,69 @@ function parsePage(adapter: Source['adapter'], html: string, finalUrl: string) {
   }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Turn a fetched body into listings, whatever shape it arrived in.
+ *
+ * Shared by the server scan and /api/parse, so a page fetched by the user's
+ * browser is parsed by exactly the same code as one we fetched ourselves.
+ */
+export function listingsFromBody(
+  adapter: Source['adapter'],
+  body: string,
+  url: string,
+  apiKind?: ApiKind,
+): RawListing[] {
+  const trimmed = body.trimStart()
+  if (apiKind || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return listingsFromJson(apiKind ?? 'next-data', JSON.parse(body), url)
+    } catch {
+      // Not JSON after all — treat it as markup.
+    }
+  }
+  return parseMarkup(adapter, body, url).listings
+}
+
+/** Follow a JSON endpoint across pages until it stops yielding anything new. */
+async function collectFromApi(
+  pageUrl: (page: number) => string,
+  kind: ApiKind,
+  baseUrl: string,
+  maxPages: number,
+  maxListings: number,
+): Promise<{ listings: RawListing[]; pages: number }> {
+  const listings: RawListing[] = []
+  const seen = new Set<string>()
+  let pages = 0
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    let body: string
+    try {
+      const response = await fetchHtml(pageUrl(page), { timeoutMs: 15000, accept: 'application/json' })
+      body = response.html
+    } catch {
+      break
+    }
+    pages += 1
+
+    let parsed: RawListing[]
+    try {
+      parsed = listingsFromJson(kind, JSON.parse(body), baseUrl)
+    } catch {
+      break
+    }
+
+    const fresh = parsed.filter((listing) => !seen.has(listing.url))
+    for (const listing of fresh) seen.add(listing.url)
+    listings.push(...fresh)
+
+    if (!fresh.length) break
+    if (listings.length >= maxListings) break
+    await sleep(PAGE_DELAY_MS)
+  }
+
+  return { listings, pages }
+}
 
 export async function scanSource(
   source: Source,
@@ -54,38 +120,91 @@ export async function scanSource(
   const seenUrls = new Set<string>()
   const visited = new Set<string>()
 
-  let target: string | null = source.url
   let pages = 0
+  let via: SourceReport['via'] = 'server'
+  let firstError: ScrapeError | null = null
+
+  const absorb = (listings: RawListing[]) => {
+    for (const listing of listings) {
+      if (seenUrls.has(listing.url)) continue
+      seenUrls.add(listing.url)
+      collected.push(listing)
+    }
+  }
 
   try {
-    while (target && pages < maxPages) {
-      if (visited.has(target)) break
-      visited.add(target)
+    // --- Page 1 of the markup. Also the source of platform hints for API discovery.
+    let html: string | undefined
+    let target: string | null = source.url
 
-      const { html, finalUrl } = await fetchHtml(target, {
+    try {
+      visited.add(source.url)
+      const first = await fetchHtml(source.url, {
         mobile: source.adapter === 'facebook',
         cookieEnv: source.adapter === 'facebook' ? 'FACEBOOK_COOKIE' : undefined,
         timeoutMs: 20000,
-        referer: pages > 0 ? source.url : undefined,
+      })
+      html = first.html
+      pages = 1
+
+      const parsed = parseMarkup(source.adapter, first.html, first.finalUrl)
+      absorb(parsed.listings)
+      target = maxPages > 1 ? nextPageUrl(parsed.$, first.finalUrl) : null
+    } catch (error) {
+      // A blocked HTML page does not rule out an open JSON endpoint, so record
+      // the failure and let discovery run from the URL shape alone.
+      if (error instanceof ScrapeError) firstError = error
+      else throw error
+      target = null
+    }
+
+    // --- A JSON endpoint, if one exists, usually beats the markup outright.
+    for (const candidate of discoverApiEndpoints(source.url, html)) {
+      const api = await collectFromApi(
+        candidate.pageUrl,
+        candidate.kind,
+        source.url,
+        maxPages,
+        criteria.maxPerSource,
+      )
+      if (!api.listings.length) continue
+
+      if (api.listings.length > collected.length) {
+        collected.length = 0
+        seenUrls.clear()
+        via = 'server-api'
+        pages = api.pages
+        firstError = null
+      }
+      absorb(api.listings)
+      break
+    }
+
+    // --- Otherwise keep paging through the markup.
+    while (via === 'server' && target && pages < maxPages && collected.length < criteria.maxPerSource) {
+      if (visited.has(target)) break
+      visited.add(target)
+
+      const response = await fetchHtml(target, {
+        mobile: source.adapter === 'facebook',
+        cookieEnv: source.adapter === 'facebook' ? 'FACEBOOK_COOKIE' : undefined,
+        timeoutMs: 20000,
+        referer: source.url,
       })
       pages += 1
 
-      const { $, listings } = parsePage(source.adapter, html, finalUrl)
-
-      // Stop as soon as a page adds nothing new — this is what makes following
-      // a guessed `?page=N` safe, and it also catches sites that clamp an
+      const parsed = parseMarkup(source.adapter, response.html, response.finalUrl)
+      const before = collected.length
+      absorb(parsed.listings)
+      // Nothing new means we have reached the end, or the site clamped an
       // out-of-range page back to the first one.
-      const fresh = listings.filter((listing) => !seenUrls.has(listing.url))
-      for (const listing of fresh) seenUrls.add(listing.url)
-      collected.push(...fresh)
-      if (!fresh.length) break
+      if (collected.length === before) break
 
-      // Enough for the cap already; no reason to keep asking for pages.
-      if (collected.length >= criteria.maxPerSource) break
-
-      target = pages < maxPages ? nextPageUrl($, finalUrl) : null
+      target = nextPageUrl(parsed.$, response.finalUrl)
       if (target) await sleep(PAGE_DELAY_MS)
     }
+
+    if (!collected.length && firstError) throw firstError
 
     const listings = mergeByUrl(collected)
     const { bikes, dropped } = buildBikes(listings, source, criteria, weights)
@@ -94,6 +213,7 @@ export async function scanSource(
       report: {
         ...base,
         ok: true,
+        via,
         pages,
         found: listings.length,
         kept: bikes.length,
@@ -106,28 +226,22 @@ export async function scanSource(
       bikes,
     }
   } catch (error) {
-    // A later page failing should not throw away the pages that worked.
+    // A later failure should not discard the pages that did work.
     const listings = mergeByUrl(collected)
     const { bikes, dropped } = listings.length
       ? buildBikes(listings, source, criteria, weights)
       : { bikes: [] as ScoredBike[], dropped: {} as Record<string, number> }
 
-    const message =
-      error instanceof ScrapeError
-        ? error.message
-        : error instanceof Error
-          ? error.message
-          : 'Unknown error while scanning.'
-
     return {
       report: {
         ...base,
         ok: bikes.length > 0,
+        via,
         pages,
         found: listings.length,
         kept: bikes.length,
         dropped,
-        error: message,
+        error: error instanceof Error ? error.message : 'Unknown error while scanning.',
         hint: error instanceof ScrapeError ? error.hint : undefined,
       },
       bikes,
@@ -136,3 +250,4 @@ export async function scanSource(
 }
 
 export { ScrapeError } from './fetcher'
+export { discoverApiEndpoints } from './api-discovery'

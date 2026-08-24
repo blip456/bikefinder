@@ -417,6 +417,13 @@ export function SettingsPanel({
         />
 
         <Toggle
+          label="Retry blocked sources in your browser"
+          hint="When a site refuses our server, fetch it from your own connection instead. Works for sites that expose a JSON API; ordinary pages usually block cross-origin reads."
+          checked={settings.clientFallback}
+          onChange={(next) => onChange({ ...settings, clientFallback: next })}
+        />
+
+        <Toggle
           label="Demo mode"
           hint="Score built-in sample listings instead of scraping. Useful to explore the app when a marketplace blocks server-side requests."
           checked={settings.demoMode}

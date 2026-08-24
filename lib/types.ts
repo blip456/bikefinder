@@ -137,6 +137,8 @@ export interface Settings {
   criteria: Criteria
   weights: Weights
   demoMode: boolean
+  /** Retry sources from the browser when the server is refused. */
+  clientFallback: boolean
 }
 
 export interface SourceReport {
@@ -149,6 +151,8 @@ export interface SourceReport {
   kept: number
   /** Pages actually fetched, so a truncated scan is visible rather than implied. */
   pages: number
+  /** Which route produced these results. */
+  via?: 'server' | 'server-api' | 'browser' | 'browser-api'
   /** Why listings were discarded, keyed by reason. */
   dropped?: Record<string, number>
   error?: string

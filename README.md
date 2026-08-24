@@ -56,6 +56,41 @@ is where the price and image live. Guessing which `div` was a card instead — t
 obvious approach — either merged a whole grid into one result or split one card
 into title-only fragments.
 
+### JSON APIs are preferred over scraping
+
+Before parsing markup, each scan looks for a JSON endpoint behind the page:
+
+| Platform | Endpoint | Page size |
+| --- | --- | --- |
+| Shopify | `/collections/<handle>/products.json` | 250 |
+| WooCommerce | `/wp-json/wc/store/v1/products` | 100 |
+| Next.js | `/_next/data/<buildId>/<path>.json` | page's own |
+
+Raw JSON wins on every axis: the fields are already standardised (vendor, variant
+size, price, images are passed straight through as attributes the extractor
+trusts over prose), page sizes are an order of magnitude larger than the rendered
+grid, and markup changes cannot break it. If an endpoint responds with more
+listings than the HTML did, the scan uses it and the source is badged **json api**.
+
+### When a site blocks the server
+
+Sources that refuse our server — or return nothing — are retried **from your own
+browser**, so the request carries your IP and locale instead of a datacenter's.
+The browser is only the network client; the bodies it fetches are posted to
+`/api/parse` and run through exactly the same parsing, filtering and scoring code,
+so there is one implementation of each. Results arrive badged **your browser**.
+
+This is not a general bypass, and the app does not pretend otherwise. Browsers
+enforce CORS: a cross-origin response can only be read when the site sends
+`Access-Control-Allow-Origin`, which storefront JSON APIs commonly do and
+ordinary HTML pages almost never do. So the browser path tries discovered APIs
+first and treats raw HTML as a long shot. Cookies are deliberately *not* sent,
+because a wildcard `Access-Control-Allow-Origin: *` is rejected by the browser
+for credentialed requests — sending them would break the case that usually works.
+When neither route can read a source, the report says so explicitly.
+
+Turn it off with **Settings → Results → Retry blocked sources in your browser**.
+
 ### Pagination
 
 Most marketplaces show ~24 results per page, so a single fetch sees a small
@@ -194,6 +229,7 @@ app/
   layout.tsx            fonts + metadata
   globals.css           design tokens (@theme) and base layer
   api/scan/route.ts     runs every enabled source, returns scored bikes
+  api/parse/route.ts    parses page bodies the browser fetched (no fetching here)
   api/img/route.ts      image relay (marketplace CDNs block hot-linking)
 components/
   ui/                   Bauhaus primitives: Button, Card, Chip, Field, Sheet…
@@ -206,6 +242,9 @@ lib/
   score.ts              value estimate + weighted scoring
   pipeline.ts           raw listing ➜ filtered, scored bike
   scrape/               fetcher, HTML/JSON helpers, one file per adapter
+  scrape/api-discovery.ts   finds JSON endpoints behind a results page
+  scrape/json-listings.ts   normalises Shopify / Woo / unknown JSON shapes
+  client-scrape.ts      browser-side fetching for server-blocked sources
   demo.ts               sample listings for demo mode
 ```
 

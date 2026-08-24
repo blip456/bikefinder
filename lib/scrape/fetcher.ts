@@ -33,6 +33,8 @@ export interface FetchOptions {
   /** Env var holding a cookie header for this site, e.g. FACEBOOK_COOKIE. */
   cookieEnv?: string
   referer?: string
+  /** Override the Accept header — JSON endpoints reject the HTML default. */
+  accept?: string
 }
 
 export interface FetchResult {
@@ -60,7 +62,7 @@ function applyProxy(url: string): string {
 }
 
 export async function fetchHtml(url: string, options: FetchOptions = {}): Promise<FetchResult> {
-  const { mobile = false, timeoutMs = 20000, cookieEnv, referer } = options
+  const { mobile = false, timeoutMs = 20000, cookieEnv, referer, accept } = options
 
   let target: URL
   try {
@@ -78,7 +80,7 @@ export async function fetchHtml(url: string, options: FetchOptions = {}): Promis
   const userAgent = mobile ? MOBILE_USER_AGENT : USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]
   const headers: Record<string, string> = {
     'User-Agent': userAgent,
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    Accept: accept ?? 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'nl-BE,nl;q=0.9,en-GB;q=0.8,en;q=0.7,fr;q=0.6',
     'Cache-Control': 'no-cache',
     'Upgrade-Insecure-Requests': '1',
