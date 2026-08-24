@@ -1,7 +1,7 @@
 'use client'
 
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
-import { useId } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { cn } from '@/lib/cn'
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
@@ -9,16 +9,6 @@ export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: st
     <label htmlFor={htmlFor} className="label-mono block mb-1.5 text-ink">
       {children}
     </label>
-  )
-}
-
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      {children}
-      {hint && <p className="mt-1.5 text-xs font-medium text-ink/60 leading-snug">{hint}</p>}
-    </div>
   )
 }
 
@@ -59,15 +49,6 @@ export function Select({
   )
 }
 
-export function Textarea({ className, ...props }: InputHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      {...(props as object)}
-      className={cn(CONTROL_CLASS, 'h-auto min-h-[72px] py-2 font-medium leading-relaxed', className)}
-    />
-  )
-}
-
 /** Hard-edged switch — a square knob sliding inside a bordered track. */
 export function Toggle({
   checked,
@@ -100,5 +81,129 @@ export function Toggle({
         <span className="block h-full w-6 border-2 border-ink bg-paper" />
       </button>
     </div>
+  )
+}
+
+/**
+ * Keeps a local draft string while the field has focus, and only re-syncs from
+ * the parent once focus leaves.
+ *
+ * Both inputs below publish a *parsed* value upward (an array, a number) while
+ * displaying text. Without a draft the parent would immediately serialise that
+ * parsed value back into `value` on every keystroke — so a half-typed entry
+ * gets rewritten under the caret. Typing "huffy, apollo" used to collapse to
+ * "huffyapollo" because the trailing comma parsed away the instant it appeared.
+ */
+function useDraft(canonical: string) {
+  const [draft, setDraft] = useState(canonical)
+  const focused = useRef(false)
+
+  useEffect(() => {
+    if (!focused.current) setDraft(canonical)
+  }, [canonical])
+
+  return {
+    draft,
+    setDraft,
+    onFocus: () => {
+      focused.current = true
+    },
+    onBlur: () => {
+      focused.current = false
+      // Normalise to the parsed form once the user is done.
+      setDraft(canonical)
+    },
+  }
+}
+
+/** Comma-separated free text backed by a string[]. */
+export function ListInput({
+  value,
+  onChange,
+  label,
+  hint,
+  placeholder,
+}: {
+  value: string[]
+  onChange: (next: string[]) => void
+  label?: string
+  hint?: string
+  placeholder?: string
+}) {
+  const canonical = value.join(', ')
+  const { draft, setDraft, onFocus, onBlur } = useDraft(canonical)
+
+  return (
+    <Input
+      label={label}
+      hint={hint}
+      placeholder={placeholder}
+      value={draft}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onChange={(event) => {
+        const raw = event.target.value
+        setDraft(raw)
+        onChange(
+          raw
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean),
+        )
+      }}
+    />
+  )
+}
+
+/**
+ * Numeric field that tolerates being emptied mid-edit.
+ *
+ * @param emptyValue What to publish when the box is blank — null for optional
+ *   bounds, a concrete number for settings that must always have one.
+ */
+export function NumberInput({
+  value,
+  onChange,
+  emptyValue = null,
+  label,
+  hint,
+  min,
+  max,
+}: {
+  value: number | null
+  onChange: (next: number | null) => void
+  emptyValue?: number | null
+  label?: string
+  hint?: string
+  min?: number
+  max?: number
+}) {
+  const canonical = value === null || Number.isNaN(value) ? '' : String(value)
+  const { draft, setDraft, onFocus, onBlur } = useDraft(canonical)
+
+  return (
+    <Input
+      label={label}
+      hint={hint}
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      value={draft}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onChange={(event) => {
+        const raw = event.target.value
+        setDraft(raw)
+        if (raw.trim() === '') {
+          onChange(emptyValue)
+          return
+        }
+        const parsed = Number(raw)
+        // "-" and "1e" are transient states while typing; keep the draft and
+        // leave the published value alone rather than writing NaN.
+        if (Number.isFinite(parsed)) onChange(parsed)
+      }}
+    />
   )
 }

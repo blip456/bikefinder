@@ -13,12 +13,12 @@ import type {
   Source,
   WeightKey,
 } from '@/lib/types'
-import { DEFAULT_SETTINGS, detectAdapter, labelFromUrl, newSourceId } from '@/lib/settings'
+import { DEFAULT_CRITERIA, DEFAULT_SETTINGS, detectAdapter, labelFromUrl, newSourceId } from '@/lib/settings'
 import { WEIGHT_META } from '@/lib/score'
 import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
 import { Chip, ToggleChip } from '@/components/ui/Chip'
-import { Field, Input, Label, Toggle } from '@/components/ui/Field'
+import { Input, Label, ListInput, NumberInput, Toggle } from '@/components/ui/Field'
 import { Sheet } from '@/components/ui/Sheet'
 
 const SIZES: SizeLabel[] = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL']
@@ -90,12 +90,6 @@ function ChipRow<T extends string | number>({
     </div>
   )
 }
-
-const toList = (value: string): string[] =>
-  value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
 
 export function SettingsPanel({
   open,
@@ -245,28 +239,22 @@ export function SettingsPanel({
         tone="blue"
       >
         <div className="grid grid-cols-2 gap-3">
-          <Input
+          <NumberInput
             label="Min price (€)"
-            type="number"
-            inputMode="numeric"
-            value={criteria.minPrice ?? ''}
-            onChange={(event) => patchCriteria({ minPrice: event.target.value ? Number(event.target.value) : null })}
+            value={criteria.minPrice}
+            onChange={(minPrice) => patchCriteria({ minPrice })}
           />
-          <Input
+          <NumberInput
             label="Max price (€)"
-            type="number"
-            inputMode="numeric"
-            value={criteria.maxPrice ?? ''}
-            onChange={(event) => patchCriteria({ maxPrice: event.target.value ? Number(event.target.value) : null })}
+            value={criteria.maxPrice}
+            onChange={(maxPrice) => patchCriteria({ maxPrice })}
           />
         </div>
 
-        <Input
+        <NumberInput
           label="Earliest model year"
-          type="number"
-          inputMode="numeric"
-          value={criteria.minYear ?? ''}
-          onChange={(event) => patchCriteria({ minYear: event.target.value ? Number(event.target.value) : null })}
+          value={criteria.minYear}
+          onChange={(minYear) => patchCriteria({ minYear })}
         />
 
         <ChipRow
@@ -285,28 +273,28 @@ export function SettingsPanel({
           hint="Leave empty to accept any condition."
         />
 
-        <Field label="Required keywords" hint="Comma separated. A listing must contain at least one. Leave empty to skip.">
-          <Input
-            value={criteria.keywords.join(', ')}
-            onChange={(event) => patchCriteria({ keywords: toList(event.target.value) })}
-            placeholder="e.g. carbon, fully"
-          />
-        </Field>
+        <ListInput
+          label="Required keywords"
+          hint="Comma separated. A listing must contain at least one. Leave empty to skip."
+          value={criteria.keywords}
+          onChange={(keywords) => patchCriteria({ keywords })}
+          placeholder="e.g. carbon, fully"
+        />
 
-        <Field label="Excluded keywords" hint="Comma separated. Any match drops the listing.">
-          <Input
-            value={criteria.excludeKeywords.join(', ')}
-            onChange={(event) => patchCriteria({ excludeKeywords: toList(event.target.value) })}
-          />
-        </Field>
+        <ListInput
+          label="Excluded keywords"
+          hint="Comma separated. Any match drops the listing."
+          value={criteria.excludeKeywords}
+          onChange={(excludeKeywords) => patchCriteria({ excludeKeywords })}
+        />
 
-        <Field label="Excluded brands" hint="Comma separated.">
-          <Input
-            value={criteria.excludeBrands.join(', ')}
-            onChange={(event) => patchCriteria({ excludeBrands: toList(event.target.value) })}
-            placeholder="e.g. huffy, muddyfox"
-          />
-        </Field>
+        <ListInput
+          label="Excluded brands"
+          hint="Comma separated."
+          value={criteria.excludeBrands}
+          onChange={(excludeBrands) => patchCriteria({ excludeBrands })}
+          placeholder="e.g. huffy, muddyfox"
+        />
 
         <Toggle
           label="Allow e-bikes"
@@ -356,13 +344,13 @@ export function SettingsPanel({
           onToggle={(value) => patchCriteria({ wheelSizes: toggleIn(criteria.wheelSizes, value) })}
           tone="yellow"
         />
-        <Field label="Preferred brands" hint="Comma separated. Matching brands score higher on fit.">
-          <Input
-            value={criteria.brands.join(', ')}
-            onChange={(event) => patchCriteria({ brands: toList(event.target.value) })}
-            placeholder="e.g. santa cruz, canyon"
-          />
-        </Field>
+        <ListInput
+          label="Preferred brands"
+          hint="Comma separated. Matching brands score higher on fit."
+          value={criteria.brands}
+          onChange={(brands) => patchCriteria({ brands })}
+          placeholder="e.g. santa cruz, canyon"
+        />
       </Section>
 
       <Section
@@ -400,23 +388,21 @@ export function SettingsPanel({
 
       <Section title="Results" tone="red">
         <div className="grid grid-cols-2 gap-3">
-          <Input
+          <NumberInput
             label="Min score"
-            type="number"
-            inputMode="numeric"
             min={0}
             max={100}
             value={criteria.minScore}
-            onChange={(event) => patchCriteria({ minScore: Number(event.target.value) || 0 })}
+            emptyValue={0}
+            onChange={(minScore) => patchCriteria({ minScore: minScore ?? 0 })}
           />
-          <Input
+          <NumberInput
             label="Max per source"
-            type="number"
-            inputMode="numeric"
             min={1}
             max={200}
             value={criteria.maxPerSource}
-            onChange={(event) => patchCriteria({ maxPerSource: Number(event.target.value) || 60 })}
+            emptyValue={DEFAULT_CRITERIA.maxPerSource}
+            onChange={(maxPerSource) => patchCriteria({ maxPerSource: maxPerSource ?? DEFAULT_CRITERIA.maxPerSource })}
           />
         </div>
         <Toggle
