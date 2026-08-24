@@ -76,6 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   criteria: DEFAULT_CRITERIA,
   weights: DEFAULT_WEIGHTS,
   demoMode: false,
+  clientFallback: true,
 }
 
 /** Merge stored settings over the defaults so new fields appear for old users. */
@@ -96,6 +97,7 @@ export function hydrateSettings(stored: unknown): Settings {
     criteria: { ...DEFAULT_CRITERIA, ...(raw.criteria ?? {}) },
     weights: { ...DEFAULT_WEIGHTS, ...(raw.weights ?? {}) },
     demoMode: Boolean(raw.demoMode),
+    clientFallback: raw.clientFallback ?? true,
   }
 }
 

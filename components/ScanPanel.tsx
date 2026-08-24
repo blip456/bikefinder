@@ -84,6 +84,14 @@ export function ScanPanel({
   )
 }
 
+/** How a source's results were obtained, shown as a badge on its report. */
+const VIA_LABELS: Record<NonNullable<SourceReport['via']>, string> = {
+  server: 'server',
+  'server-api': 'json api',
+  browser: 'your browser',
+  'browser-api': 'browser · json api',
+}
+
 /** Per-source outcome strip. Failures are loud on purpose. */
 export function SourceReports({ reports }: { reports: SourceReport[] }) {
   const [open, setOpen] = useState(false)
@@ -126,7 +134,19 @@ export function SourceReports({ reports }: { reports: SourceReport[] }) {
                 )}
               >
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm font-black uppercase tracking-wide">{report.label}</span>
+                  <span className="min-w-0 text-sm font-black uppercase tracking-wide">
+                    {report.label}
+                    {report.via && report.via !== 'server' && (
+                      <span
+                        className={cn(
+                          'ml-2 border-2 border-ink px-1 py-0.5 align-middle text-[9px] font-black uppercase tracking-widest',
+                          bad ? 'bg-white/15 text-white' : 'bg-bh-yellow text-ink',
+                        )}
+                      >
+                        {VIA_LABELS[report.via]}
+                      </span>
+                    )}
+                  </span>
                   <span className={cn('label-mono shrink-0', bad ? 'text-white/80' : 'text-ink/50')}>
                     {bad && report.kept === 0
                       ? 'failed'

@@ -11,6 +11,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { SiteHeader } from '@/components/SiteHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { scanSourceFromBrowser } from '@/lib/client-scrape'
 import { DEFAULT_SETTINGS, RESULTS_KEY, loadSettings, saveSettings } from '@/lib/settings'
 import type { ScanResponse, ScoredBike, Settings, SourceReport } from '@/lib/types'
 
@@ -26,6 +27,7 @@ export default function Home() {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [retrying, setRetrying] = useState<string[]>([])
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [view, setView] = useState<ViewMode>('gallery')
   const [selected, setSelected] = useState<ScoredBike | null>(null)
@@ -52,6 +54,43 @@ export default function Home() {
     saveSettings(next)
   }, [])
 
+  const retryInBrowser = useCallback(
+    async (data: ScanResponse, stuck: SourceReport[]): Promise<ScanResponse> => {
+      const bySource = new Map(settings.sources.map((source) => [source.id, source]))
+      const reports = [...data.sources]
+      const bikes = [...data.bikes]
+      const seen = new Set(bikes.map((bike) => bike.url))
+
+      for (const report of stuck) {
+        const source = bySource.get(report.id)
+        if (!source) continue
+
+        let result
+        try {
+          result = await scanSourceFromBrowser(source, settings)
+        } catch {
+          continue
+        }
+        if (!result) continue
+
+        // Only replace the server's report when the browser actually did better.
+        if (result.bikes.length || !report.ok) {
+          const index = reports.findIndex((entry) => entry.id === report.id)
+          if (index >= 0) reports[index] = result.report
+        }
+        for (const bike of result.bikes) {
+          if (seen.has(bike.url)) continue
+          seen.add(bike.url)
+          bikes.push(bike)
+        }
+      }
+
+      bikes.sort((a, b) => b.score - a.score)
+      return { ...data, bikes, sources: reports }
+    },
+    [settings],
+  )
+
   const scan = useCallback(async () => {
     setScanning(true)
     setError(null)
@@ -63,11 +102,25 @@ export default function Home() {
       })
       if (!response.ok) throw new Error(`Scan failed with HTTP ${response.status}.`)
 
-      const data = (await response.json()) as ScanResponse
+      let data = (await response.json()) as ScanResponse
       setBikes(data.bikes)
       setReports(data.sources)
       setScannedAt(data.scannedAt)
       setFilters((current) => ({ ...EMPTY_FILTERS, sort: current.sort }))
+
+      // Sources the server could not read are retried from here, where the
+      // request carries the user's own IP rather than a datacenter's.
+      if (settings.clientFallback && !settings.demoMode) {
+        const stuck = data.sources.filter((report) => !report.ok || report.kept === 0)
+        if (stuck.length) {
+          setRetrying(stuck.map((report) => report.label))
+          data = await retryInBrowser(data, stuck)
+          setBikes(data.bikes)
+          setReports(data.sources)
+          setRetrying([])
+        }
+      }
+
       try {
         window.localStorage.setItem(RESULTS_KEY, JSON.stringify(data))
       } catch {
@@ -78,7 +131,7 @@ export default function Home() {
     } finally {
       setScanning(false)
     }
-  }, [settings])
+  }, [settings, retryInBrowser])
 
   const visible = useMemo(() => applyFilters(bikes, filters), [bikes, filters])
 
@@ -99,6 +152,14 @@ export default function Home() {
       {error && (
         <div className="border-b-4 border-ink bg-bh-red px-4 py-3 sm:px-6">
           <p className="mx-auto max-w-7xl text-sm font-bold text-white">{error}</p>
+        </div>
+      )}
+
+      {retrying.length > 0 && (
+        <div className="border-b-4 border-ink bg-bh-yellow px-4 py-3 sm:px-6">
+          <p className="mx-auto max-w-7xl text-sm font-bold text-ink">
+            Server was refused by {retrying.join(', ')} — retrying from your browser…
+          </p>
         </div>
       )}
 
