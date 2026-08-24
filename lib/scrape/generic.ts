@@ -22,14 +22,8 @@ import {
 
 const PRICE_RE = /(?:€|eur|euro)\s*\d[\d.,\s]*|\d[\d.,\s]*\s*(?:€|eur\b|euro\b|,-)/i
 
-const CARD_SELECTOR = [
-  'li', 'article',
-  '[class*="card" i]', '[class*="listing" i]', '[class*="item" i]',
-  '[class*="product" i]', '[class*="result" i]', '[class*="tile" i]',
-  '[data-testid]',
-].join(',')
-
-const NOISE_RE = /(cookie|privacy|inloggen|log\s*in|sign\s*up|registreren|abonnement|newsletter|nieuwsbrief|sitemap|voorwaarden|advertentie plaatsen|plaats\s*je\s*advertentie)/i
+const NOISE_RE =
+  /(cookie|privacy|inloggen|log\s*in|sign\s*up|registreren|abonnement|newsletter|nieuwsbrief|sitemap|voorwaarden)/i
 
 /** Grab the best image reference an element (or its subtree) offers. */
 export function imageFrom($: Cheerio, element: unknown, baseUrl: string): string | null {
@@ -66,6 +60,175 @@ export function imageFrom($: Cheerio, element: unknown, baseUrl: string): string
 function priceFrom(text: string): number | null {
   const match = text.match(PRICE_RE)
   return match ? parsePrice(match[0]) : null
+}
+
+/** Directory part of a URL path: "/products/trek-powerfly-5" -> "/products". */
+function pathPrefix(url: string): string {
+  try {
+    const segments = new URL(url).pathname.split('/').filter(Boolean)
+    return '/' + segments.slice(0, -1).join('/')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Identify which links on the page are the actual results.
+ *
+ * Result links share a directory prefix and each point at a distinct path, so
+ * grouping every link by its prefix and taking the largest group by distinct
+ * *paths* isolates the product grid. Navigation, vendor and filter links form
+ * small groups, or (like Shopify's "/collections/vendors?q=Trek") many links
+ * that collapse onto a single path.
+ */
+function resultLinks($: Cheerio, baseUrl: string, linkPattern?: RegExp): Set<string> {
+  const byPrefix = new Map<string, { urls: Set<string>; paths: Set<string> }>()
+
+  $('a[href]').each((_, element) => {
+    const href = absoluteUrl($(element).attr('href'), baseUrl)
+    if (!href) return
+    if (linkPattern && !linkPattern.test(href)) return
+
+    let path: string
+    try {
+      const parsed = new URL(href)
+      if (parsed.origin !== new URL(baseUrl).origin) return
+      path = parsed.pathname
+    } catch {
+      return
+    }
+    if (path === '/' || path.length < 2) return
+
+    const prefix = pathPrefix(href)
+    const bucket = byPrefix.get(prefix) ?? { urls: new Set<string>(), paths: new Set<string>() }
+    bucket.urls.add(href)
+    bucket.paths.add(path)
+    byPrefix.set(prefix, bucket)
+  })
+
+  if (!byPrefix.size) return new Set()
+
+  // A link pattern is an explicit statement of intent — trust it wholesale.
+  if (linkPattern) {
+    const all = new Set<string>()
+    for (const bucket of byPrefix.values()) for (const url of bucket.urls) all.add(url)
+    return all
+  }
+
+  let best: { urls: Set<string>; paths: Set<string> } | null = null
+  for (const bucket of byPrefix.values()) {
+    if (!best || bucket.paths.size > best.paths.size) best = bucket
+  }
+  // One distinct path is a repeated link (paginated vendor filters and the like).
+  if (!best || best.paths.size < 2) return new Set()
+
+  // Keep one URL per distinct path so query-string variants do not duplicate.
+  const chosen = new Map<string, string>()
+  for (const url of best.urls) {
+    try {
+      const path = new URL(url).pathname
+      if (!chosen.has(path)) chosen.set(path, url)
+    } catch {
+      /* ignore */
+    }
+  }
+  return new Set(chosen.values())
+}
+
+/**
+ * From a result link, climb to the outermost ancestor that still describes only
+ * this result. That element is the card, and it is where the price and image
+ * live — the anchor itself usually wraps just the title or the thumbnail.
+ */
+function cardElementFor(
+  $: Cheerio,
+  anchor: ReturnType<Cheerio>,
+  href: string,
+  results: Set<string>,
+  baseUrl: string,
+): ReturnType<Cheerio> {
+  let card = anchor
+  let node = anchor
+
+  for (let depth = 0; depth < 10; depth += 1) {
+    const parent = node.parent()
+    if (!parent.length || parent.is('body, html, head, main')) break
+
+    const reachesAnotherResult = parent
+      .find('a[href]')
+      .toArray()
+      .some((link) => {
+        const other = absoluteUrl($(link).attr('href'), baseUrl)
+        return Boolean(other) && other !== href && results.has(other as string)
+      })
+    if (reachesAnotherResult) break
+
+    card = parent
+    node = parent
+  }
+  return card
+}
+
+export interface HarvestOptions {
+  /** Only treat links matching this as results (e.g. /v/ detail pages). */
+  linkPattern?: RegExp
+  titleSelectors?: string[]
+  priceSelectors?: string[]
+}
+
+/**
+ * Strategy 2 — reconstruct result cards from the DOM.
+ *
+ * Anchor-first rather than container-first: we decide what the results *are*
+ * from the link structure, then find each one's card by climbing. Scanning
+ * containers instead meant guessing which `div` was a card, which either merged
+ * a whole grid into one result or split one card into title-only fragments.
+ */
+export function harvestCards($: Cheerio, baseUrl: string, options: HarvestOptions = {}): RawListing[] {
+  const { linkPattern, titleSelectors = [], priceSelectors = [] } = options
+  const results = resultLinks($, baseUrl, linkPattern)
+  if (!results.size) return []
+
+  const listings: RawListing[] = []
+  const seen = new Set<string>()
+
+  $('a[href]').each((_, element) => {
+    const anchor = $(element)
+    const href = absoluteUrl(anchor.attr('href'), baseUrl)
+    if (!href || !results.has(href) || seen.has(href)) return
+    seen.add(href)
+
+    const card = cardElementFor($, anchor, href, results, baseUrl)
+    const cardText = cleanText(card.text())
+    if (cardText.length > 2000) return
+    if (NOISE_RE.test(cardText) && cardText.length < 80) return
+
+    let title = ''
+    for (const titleSelector of titleSelectors) {
+      title = cleanText(card.find(titleSelector).first().text())
+      if (title) break
+    }
+    if (!title) title = cleanText(card.find('h1,h2,h3,h4,h5').first().text())
+    if (!title) title = cleanText(anchor.text())
+    if (!title) title = cleanText(anchor.attr('title') ?? anchor.attr('aria-label') ?? '')
+    if (!title) title = cleanText(card.find('img[alt]').first().attr('alt') ?? '')
+    title = title.slice(0, 180)
+    if (title.length < 6) return
+
+    let price: number | null = null
+    for (const priceSelector of priceSelectors) {
+      price = parsePrice(cleanText(card.find(priceSelector).first().text()))
+      if (price !== null) break
+    }
+    if (price === null) price = priceFrom(cardText)
+
+    const image = imageFrom($, card[0], baseUrl)
+    const description = cleanText(cardText.replace(title, ' ')).slice(0, 600)
+
+    listings.push({ url: href, title, description, price, currency: 'EUR', images: image ? [image] : [] })
+  })
+
+  return listings
 }
 
 /** Strategy 1 — schema.org data embedded as JSON-LD. */
@@ -120,85 +283,25 @@ export function fromJsonLd($: Cheerio, baseUrl: string): RawListing[] {
   return listings
 }
 
-export interface HarvestOptions {
-  /** Adapter-specific card selectors, tried before the generic ones. */
-  cardSelectors?: string[]
-  /** Only keep links whose href matches this (e.g. /v/ detail pages). */
-  linkPattern?: RegExp
-  titleSelectors?: string[]
-  priceSelectors?: string[]
-}
-
-/** Strategy 2 — walk the DOM and reconstruct result cards. */
-export function harvestCards($: Cheerio, baseUrl: string, options: HarvestOptions = {}): RawListing[] {
-  const { cardSelectors = [], linkPattern, titleSelectors = [], priceSelectors = [] } = options
-  const byUrl = new Map<string, RawListing>()
-
-  const scan = (selector: string) => {
-    $(selector).each((_, element) => {
-      const card = $(element)
-
-      // Reject result *lists* masquerading as cards. A wrapper holding several
-      // candidate containers AND several distinct links is a list, not a card —
-      // taking it would merge every listing's text into one bogus result.
-      const innerCards = card.find(selector).length
-      const innerHrefs = new Set(
-        card
-          .find('a[href]')
-          .map((_, link) => absoluteUrl($(link).attr('href'), baseUrl))
-          .get()
-          .filter(Boolean),
-      )
-      if (innerCards >= 2 && innerHrefs.size >= 2) return
-
-      const anchor = card.is('a[href]') ? card : card.find('a[href]').first()
-      const href = absoluteUrl(anchor.attr('href'), baseUrl)
-      if (!href) return
-      if (linkPattern && !linkPattern.test(href)) return
-      if (byUrl.has(href)) return
-
-      const cardText = cleanText(card.text())
-      if (!cardText || cardText.length > 1200) return
-      if (NOISE_RE.test(cardText) && cardText.length < 80) return
-
-      let title = ''
-      for (const titleSelector of titleSelectors) {
-        title = cleanText(card.find(titleSelector).first().text())
-        if (title) break
-      }
-      if (!title) title = cleanText(card.find('h1,h2,h3,h4,h5').first().text())
-      if (!title) title = cleanText(anchor.attr('title') ?? anchor.attr('aria-label') ?? '')
-      if (!title) title = cleanText(card.find('img[alt]').first().attr('alt') ?? '')
-      if (!title) title = cleanText(anchor.text()).slice(0, 140)
-      if (title.length < 6) return
-
-      let price: number | null = null
-      for (const priceSelector of priceSelectors) {
-        price = parsePrice(cleanText(card.find(priceSelector).first().text()))
-        if (price !== null) break
-      }
-      if (price === null) price = priceFrom(cardText)
-
-      const image = imageFrom($, element, baseUrl)
-
-      // Everything after the title is usually the teaser/description.
-      const description = cleanText(cardText.replace(title, ' ')).slice(0, 600)
-
-      byUrl.set(href, {
-        url: href,
-        title,
-        description,
-        price,
-        currency: 'EUR',
-        images: image ? [image] : [],
-      })
+/** Combine listings from several strategies, filling gaps rather than overwriting. */
+export function mergeByUrl(listings: RawListing[]): RawListing[] {
+  const map = new Map<string, RawListing>()
+  for (const listing of listings) {
+    const existing = map.get(listing.url)
+    if (!existing) {
+      map.set(listing.url, listing)
+      continue
+    }
+    map.set(listing.url, {
+      ...existing,
+      ...listing,
+      price: listing.price ?? existing.price ?? null,
+      images: dedupe([...(existing.images ?? []), ...(listing.images ?? [])]),
+      description: listing.description || existing.description || '',
+      attributes: { ...(existing.attributes ?? {}), ...(listing.attributes ?? {}) },
     })
   }
-
-  for (const selector of cardSelectors) scan(selector)
-  if (byUrl.size < 3) scan(CARD_SELECTOR)
-
-  return [...byUrl.values()]
+  return [...map.values()]
 }
 
 /** Strategy 3 — the URL points at one bike rather than a result list. */

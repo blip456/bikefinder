@@ -114,6 +114,9 @@ export function SourceReports({ reports }: { reports: SourceReport[] }) {
         <ul className="mt-3 space-y-2">
           {reports.map((report) => {
             const bad = !report.ok || Boolean(report.error)
+            const dropReasons = Object.entries(report.dropped ?? {})
+              .filter(([, count]) => count > 0)
+              .sort((a, b) => b[1] - a[1])
             return (
               <li
                 key={report.id}
@@ -125,10 +128,30 @@ export function SourceReports({ reports }: { reports: SourceReport[] }) {
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-sm font-black uppercase tracking-wide">{report.label}</span>
                   <span className={cn('label-mono shrink-0', bad ? 'text-white/80' : 'text-ink/50')}>
-                    {bad ? 'failed' : `${report.kept} kept / ${report.found} found`}
+                    {bad && report.kept === 0
+                      ? 'failed'
+                      : `${report.kept} kept / ${report.found} found · ${report.pages} page${report.pages === 1 ? '' : 's'}`}
                   </span>
                 </div>
                 {report.error && <p className="mt-1.5 text-xs font-bold leading-snug">{report.error}</p>}
+
+                {/* Where the missing listings went — the first thing you want when
+                    a source returns fewer results than the site shows. */}
+                {dropReasons.length > 0 && (
+                  <ul className="mt-2 flex flex-wrap gap-1">
+                    {dropReasons.map(([reason, count]) => (
+                      <li
+                        key={reason}
+                        className={cn(
+                          'border-2 border-ink px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                          bad ? 'bg-white/15 text-white' : 'bg-muted text-ink',
+                        )}
+                      >
+                        {count} {reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {report.hint && (
                   <p className={cn('mt-1 text-xs font-medium leading-snug', bad ? 'text-white/80' : 'text-ink/60')}>
                     {report.hint}

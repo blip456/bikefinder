@@ -399,12 +399,23 @@ export function SettingsPanel({
           <NumberInput
             label="Max per source"
             min={1}
-            max={200}
+            max={500}
             value={criteria.maxPerSource}
             emptyValue={DEFAULT_CRITERIA.maxPerSource}
             onChange={(maxPerSource) => patchCriteria({ maxPerSource: maxPerSource ?? DEFAULT_CRITERIA.maxPerSource })}
           />
         </div>
+
+        <NumberInput
+          label="Pages to follow per source"
+          hint="Most marketplaces show ~24 results per page. Following more pages finds more bikes but makes each scan slower."
+          min={1}
+          max={10}
+          value={criteria.maxPages}
+          emptyValue={DEFAULT_CRITERIA.maxPages}
+          onChange={(maxPages) => patchCriteria({ maxPages: maxPages ?? DEFAULT_CRITERIA.maxPages })}
+        />
+
         <Toggle
           label="Demo mode"
           hint="Score built-in sample listings instead of scraping. Useful to explore the app when a marketplace blocks server-side requests."

@@ -19,7 +19,7 @@ import {
   pickString,
   upgradeImage,
 } from './html'
-import { harvestCards, scrapeGeneric } from './generic'
+import { harvestCards, mergeByUrl, scrapeGeneric } from './generic'
 
 const INLINE_MARKERS = ['__NEXT_DATA__', 'window.__NUXT__', 'window.__INITIAL_STATE__', '"bikes":']
 
@@ -125,23 +125,18 @@ function fromInlineJson(html: string, baseUrl: string): RawListing[] {
 }
 
 export function scrapeBuycycle(html: string, $: Cheerio, baseUrl: string): RawListing[] {
+  // Always run both strategies and union them. Returning early on the inline
+  // blob used to cap the result set at whatever the page happened to hydrate
+  // with — often just a few "recently viewed" bikes — while the real grid sat
+  // unread in the DOM.
   const fromJson = fromInlineJson(html, baseUrl)
-  if (fromJson.length >= 3) return fromJson
-
   const fromDom = harvestCards($, baseUrl, {
-    cardSelectors: [
-      '[data-testid*="bike" i]',
-      '[class*="bike-card" i]',
-      '[class*="BikeCard" i]',
-      '[class*="product-card" i]',
-      'a[href*="/bike/"]',
-    ],
     linkPattern: /\/bikes?\//i,
     titleSelectors: ['[class*="title" i]', '[class*="name" i]', 'h2', 'h3'],
     priceSelectors: ['[class*="price" i]', '[data-testid*="price" i]'],
   })
 
-  const merged = [...fromJson, ...fromDom]
+  const merged = mergeByUrl([...fromJson, ...fromDom])
   if (merged.length) return merged
   return scrapeGeneric($, baseUrl, { linkPattern: /\/bikes?\//i })
 }
